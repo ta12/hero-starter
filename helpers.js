@@ -73,7 +73,7 @@ helpers.ringTwoTiles = function(gameData, tile) {
 
   var isInacessible = function(direction){
     var temp = helpers.getTileNearby(gameData.board, tile.distanceFromTop, tile.distanceFromLeft, direction);
-    return !temp || !(temp.type === 'Unoccupied' || temp.type === 'Hero');
+    return !temp || !(temp.type === 'Unoccupied' || (temp.type === 'Hero' && temp.health < 40));
   };
 
   if (isInacessible('North')){
