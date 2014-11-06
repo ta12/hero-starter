@@ -13,12 +13,18 @@ var move = function(gameData/*Old*/, helpers){
     return tile.type === 'DiamondMine' && (!tile.owner || tile.owner.id !== myHero.id);
   };
   var isDiamondAbandoned = function(tile){
-    if (!isDiamondAnyone(tile)) return false;
-    if (!tile.owner) return true;
+    if (!isDiamondEnemy(tile)) return false;
+    if (!tile.owner || tile.owner.dead) return true;
     var mineOwner = helpers.findNearestObjectDirectionAndDistance(board, tile, function(enemy){
       return tile.owner.id === enemy.id;
     },false);
-    return (!mineOwner || mineOwner.distance > 3);
+    var closeMiner = helpers.findNearestObjectDirectionAndDistance(board, tile, isEnemyAbove(30),false);
+    return (!closeMiner || closeMiner.distance > 2);
+  };
+  var isNearAbandonedMine = function(tile){
+    if (isUnoccupied(tile) && !tile.unsafe)
+      return (helpers.adjacentTiles(gameData,tile,false).filter(isDiamondAbandoned).length > 0);
+    return false;
   };
   var isEnemyBelow = function(hp){return function(tile){
     return tile.type === 'Hero' && tile.team !== myHero.team && tile.health <= hp;
@@ -30,23 +36,22 @@ var move = function(gameData/*Old*/, helpers){
     return tile.type === 'Hero' && tile.team === myHero.team && tile.id !== myHero.id && tile.health <= hp;
   };};
   var isProtectedEnemy = function(tile){
-    var company = helpers.adjacentTiles(gameData, tile, false).filter(isEnemyAbove(0));
+    if ( !(isEnemyBelow(myHero.health + 10)(tile)) ) return false;
+    var company = helpers.adjacentTiles(gameData, tile, false);
     company = company.filter(isEnemyAbove(0)).concat( company.filter(isHealthWell) );
     return company.length;
   };
   var weakToStrong = function(t1,t2){return t1.health > t2.health};
   var getDirection = function(tile,msg){
-    /*
-    if(window && window.console){
-      console.log(helpers.asciiBoard(gameData));
-      console.log(msg+'    myh:'+ (tile==myHero)+'    dir:'+(tile.direction)+'   dW:'+(tile.distanceToWell)+'   dM:'+(tile.distanceToMine));
-
+    if(window && window.console && window.console.log){
+      window.console.log(helpers.asciiBoard(gameDataOld));
+      window.console.log(msg+'     myh:'+ (tile==myHero)+' dir:'+(tile.direction)+' dW:'+(tile.distanceToWell)+' dM:'+(tile.distanceToMine));
       for(var i=0; i < possibleMoves.length; ++i){
         var pM=possibleMoves[i];
-        console.log('pos:'+pM.distanceFromTop+'|'+pM.distanceFromLeft+'   unsafe:'+pM.unsafe+'   mine:'+pM.distanceToMine+'   well:'+pM.distanceToWell+'   dir:'+pM.direction+'   copyH:'+pM.copyHealth);
+        window.console.log('pos:'+pM.distanceFromTop+'|'+pM.distanceFromLeft+'  unsafe:'+pM.unsafe+'  mine:'+pM.distanceToMine+
+        '  kill:'+pM.deathCount+'  well:'+pM.distanceToWell+'  dir:'+pM.direction+'  copyH:'+pM.copyHealth);
       };
     };
-    */
     return tile.direction;
   };
   var unsafeMoves=[],safeMoves=[];
@@ -64,18 +69,20 @@ var move = function(gameData/*Old*/, helpers){
     temp.potionNearby = temp.ringOne.filter(isHealthWell);
     temp.enemiesBelow20 = temp.ringOne.filter(isEnemyBelow(20));
     temp.enemiesAbove20 = temp.ringOne.filter(isEnemyAbove(21)).sort(weakToStrong);
-    temp.twoAwayEnemies = temp.ringTwo.filter(isEnemyAbove(0));
+    temp.twoAwayEnemies = temp.ringTwo.filter(isEnemyAbove(0)).sort(weakToStrong);
     temp.attackedEnemies = temp.twoAwayEnemies.concat(temp.enemiesAbove20);
     if(temp.enemiesAbove20.length && temp.enemiesAbove20[0].health==40){
       temp.enemiesAbove20.push(temp.enemiesAbove20.shift());
     };
   };
 
+
   // for all blocks,
   //   list all nearby enemies above 30 health.
   //   if none of them is near an enemy or HealthWell
   for(var i=0; i < possibleMoves.length; ++i){
     var pM = possibleMoves[i];
+    pM.deathCount = 0;
     for (var j=0; j < gameData.heroes.length; ++j){ // heroes e board nao contem os mesmos objetos
       temp = board.tiles[gameData.heroes[j].distanceFromTop][gameData.heroes[j].distanceFromLeft];
       if ( !gameData.heroes[j].dead /* && gameData.heroes[j].health >= myHero.health ###undefined copyHealth yields NaN on +=,-= ###*/){
@@ -87,7 +94,6 @@ var move = function(gameData/*Old*/, helpers){
           }
         };
       }
-      //gameData.heroes[j].copyHealth = gameData.heroes[j].health;
     };
     for (var j=0; j < pM.enemiesAbove20.length; ++j){
       temp = pM.enemiesAbove20[j];
@@ -101,17 +107,26 @@ var move = function(gameData/*Old*/, helpers){
     continue; // enemies are not alone
     };
     pM.copyHealth = myHero.health + 10 * (pM.twoAwayEnemies.length); // 20 dmg from twoAwayEnemies 1st turn
-    for (var j=0; j < pM.enemiesAbove20.length; ++j){
-      pM.enemiesAbove20[j].copyHealth -= ((j==0 && myHero==pM) ? 30 : 20);
+    for (var j=0; j < pM.enemiesAbove20.length; ++j)
+      pM.enemiesAbove20[j].copyHealth -= 20; // 1st attack loop, only near enemies are hit
+    if (pM === myHero){
+      if (pM.enemiesAbove20.length && pM.enemiesAbove20[0].copyHealth == 30 - 20){
+        pM.enemiesAbove20[0].copyHealth -= 10;
+      } else if (pM.potionNearby.length && pM.health < 100){
+        pM.copyHealth += 30;
+      } else if (pM.enemiesAbove20.length){
+        pM.enemiesAbove20[0].copyHealth -= 10;
+      }; // 1st turn, health or attack?
     };
     while (pM.copyHealth > 0 && pM.attackedEnemies.length > 0){
       for(var j= pM.attackedEnemies.length - 1 ;  j >= 0  ; --j){
         if (pM.attackedEnemies[j].copyHealth <= 0) {
           pM.attackedEnemies.splice(j,1);
-          pM.copyHealth -= 1; // moves that kill enemies in future take precedence; less copyHealth, more deaths
+          pM.deathCount += 1; // moves that kill enemies in future take precedence;
         };
       };
       pM.copyHealth -= 30 * (pM.attackedEnemies.length);
+      if (pM.copyHealth <= 0) break;
       for (var j=0; j < pM.attackedEnemies.length; ++j){
         pM.attackedEnemies[j].copyHealth -= 20;
       };
@@ -142,21 +157,23 @@ var move = function(gameData/*Old*/, helpers){
     possibleMoves[i].distanceToWell = temp ? temp.distance : 8*board.lengthOfSide;
     temp = helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondAbandoned, true);
     temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondEnemy, true);
-    // temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondEnemy, false);
     // Trap, resolves only by replacing myHero from board with new Unoccupied
-    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondAnyone, true);
-    // temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondAnyone, false);
-    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isGrave, true);
+//    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondAnyone, true);
     temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondAbandoned, false);
     temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondEnemy, false);
-    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondAnyone, false);
-    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isEnemyAbove(0), false);
+//    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isDiamondAnyone, false);
+    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isGrave, true);
     possibleMoves[i].distanceToMine = temp ? temp.distance : 8*board.lengthOfSide;
+    temp = helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], function(tile){
+      return isEnemyBelow(myHero.health + 10)(tile) && !isProtectedEnemy(tile);
+    }, false);
+    temp = temp || helpers.findNearestObjectDirectionAndDistance(board, possibleMoves[i], isEnemyBelow(myHero.health - 60), false);
+    possibleMoves[i].distanceToLoneEnemy = temp ? temp.distance : 8*board.lengthOfSide;
   };
   board.tiles[myHero.distanceFromTop][myHero.distanceFromLeft].type = 'Hero';
 
   //myHero direction write
-  if (myHero.alliesNearby.length)
+  if (myHero.alliesNearby.length && myHero.alliesNearby[0].health < 100)
     myHero.direction = myHero.alliesNearby[0].direction;
   if (myHero.enemiesAbove20.length)
     myHero.direction = myHero.enemiesAbove20[0].direction;
@@ -165,11 +182,12 @@ var move = function(gameData/*Old*/, helpers){
   if (myHero.potionNearby.length && myHero.health < 80)
     myHero.direction = myHero.potionNearby[0].direction;
   myHero.direction = myHero.direction || 'Stay';
+  var nearestEnemy = helpers.findNearestObjectDirectionAndDistance(board, myHero, isEnemyAbove(myHero.health - 20), false);
   helpers.adjacentTiles(gameData, myHero, true); // rewrite correct directions to nearby tiles
 
   // one-hit KO!
   possibleMoves.sort(function(t1,t2){return t1.distanceToMine > t2.distanceToMine;});
-  possibleMoves.sort(function(t1,t2){return t1.copyHealth > t2.copyHealth;});
+  possibleMoves.sort(function(t1,t2){return t1.deathCount < t2.deathCount || t1.copyHealth < t2.copyHealth;});
   for (var i=0; i < possibleMoves.length; ++i){
     if (possibleMoves[i].enemiesBelow20.length)
       return getDirection(possibleMoves[i],'FINISH HIM !!');
@@ -180,27 +198,28 @@ var move = function(gameData/*Old*/, helpers){
   };
 
   // I'M GONNA DIE! NOOOOOOOOOOOOO'
-  unsafeMoves.sort(function(t1,t2){return t1.copyHealth > t2.copyHealth;});
-  unsafeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;})
   if (safeMoves.length == 0){
+    unsafeMoves.sort(function(t1,t2){return t1.enemiesAbove20.length > t2.enemiesAbove20.length;});
     if (myHero.distanceToWell === 1) return getDirection(myHero, 'Dont leave the HealthWell');
     for (var i=0; i < unsafeMoves.length; ++i){
-      if(unsafeMoves[i].distanceToWell - 1 < myHero.health/20)
-        return getDirection(possibleMoves[i],'unsafeMoves health');
+      if( unsafeMoves[i].distanceToWell *20 < myHero.health +21 )
+        return getDirection(unsafeMoves[i],'unsafeMoves health');
     };
-    return getDirection(myHero,'NOT safeMoves');
+    unsafeMoves.sort(function(t1,t2){return t1.deathCount < t2.deathCount || t1.enemiesAbove20.length < t2.enemiesAbove20.length ;});
+    return getDirection(unsafeMoves[0],'NOT safeMoves, fight to DEATH!');
   };
 
   // ATACAAARRRR
   safeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;});
-  safeMoves.sort(function(t1,t2){return t1.copyHealth > t2.copyHealth;});
+  safeMoves.sort(function(t1,t2){return t1.deathCount < t2.deathCount/* || t1.copyHealth < t2.copyHealth;*/});
   if (!myHero.unsafe && myHero.enemiesAbove20.length)
     return getDirection(myHero,'KEEP PUSHING !!!');
   for (var i=0; i < safeMoves.length; ++i)
-    if ( safeMoves[i]!=myHero && safeMoves[i].enemiesAbove20.length)
+    if ( safeMoves[i]!=myHero && safeMoves[i].enemiesAbove20.length && myHero.health > 30)
       return getDirection(safeMoves[i],'ATACAAAAARR ! ! ! ')
+/*
   for (var i=0; i < safeMoves.length; ++i){
-    if ( safeMoves[i].copyHealth < myHero.health && safeMoves[i].direction !== 'Stay'){
+    if ( safeMoves[i].deathCount > 0 && safeMoves[i].direction !== 'Stay'){
     // check that some tile near that move is Unoccupied and not close to protected enemies
     // do i have a chance if they stay instead of attacking?
       temp = safeMoves[i].ringOne.filter(isUnoccupied);
@@ -211,60 +230,65 @@ var move = function(gameData/*Old*/, helpers){
       };
     };
   };
-/*
-  for (var i=0; i < possibleMoves.length; ++i){
-    if(possibleMoves[i].enemiesAbove20.length==1
-      && possibleMoves[i].twoAwayEnemies.length==0
-      && possibleMoves[i].enemiesAbove20[0].potionNearby.length==0
-      && possibleMoves[i].enemiesAbove20[0].enemiesAbove20.length==0)      
-        return getDirection(possibleMoves[i],'pursuit lone enemy');
-  };
 */
+
+
   // mine if safe
-  var goodHP = 70;
+  safeMoves.sort(function(t1,t2){return t1.copyHealth > t2.copyHealth});
+  var goodHP = function(tile){return Math.max(21, 21 + myHero.health - tile.copyHealth)};
   if (nearbyTiles.filter(isEnemyAbove(myHero.health - 30)).length==0){
-    temp = myHero.ringOne.filter(isDiamondEnemy).concat( myHero.ringOne.filter(isDiamondAnyone) );
-    if (temp.length && myHero.health > goodHP) return getDirection(temp[0],'take mine');
-    if (temp.length && possibleMoves[0].copyHealth > 20 && myHero.distanceToWell <= 3) return getDirection(temp[0],'Dangerous mine ???');
+    temp = myHero.ringOne.filter(isDiamondEnemy)/*.concat( myHero.ringOne.filter(isDiamondAnyone) )*/;
+    if (temp.length && myHero.health > goodHP(myHero)) return getDirection(temp[0],'take mine');
+    if (temp.length && myHero.health > 20 && (!nearestEnemy || myHero.distanceToWell *2 <= 1 + nearestEnemy.distance) )
+      return getDirection(temp[0],'Dangerous mine ???');
   };
   if (myHero.potionNearby.length && myHero.health <= 90)
     return getDirection(myHero.potionNearby[0],'potionNearby');
-
-  /*
-  if (myHero.health <= 40) return getDirection(safeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;})[0],'health');
-  if (myHero.health > 40) return getDirection(safeMoves.sort(function(t1,t2){return t1.distanceToMine > t2.distanceToMine;})[0],'seek mine');
+    /*
+  for (var i=0; i < safeMoves.length; ++i){
+    if ( safeMoves[i].copyHealth > 20 && isNearAbandonedMine(safeMoves[i]) )
+      return getDirection(safeMoves[i],'move close to mine');
+  };
   */
-  
+
+  // PERSEGUIR
+  safeMoves.sort(function(t1,t2){return t1.distanceToLoneEnemy > t2.distanceToLoneEnemy;});
+  for (var i=0; i < safeMoves.length; ++i){
+    if (safeMoves[i].distanceToLoneEnemy * 2 < safeMoves[i].distanceToMine)
+      return getDirection(safeMoves[i],'+ + + + PERSEGUIR + + + + +')
+  };
+
   // randomize, and the first two sorts are tie-breaking
   safeMoves.unshift( safeMoves.splice( Math.floor(safeMoves.length * Math.random()) , 1)[0] );
   safeMoves.unshift( safeMoves.splice( Math.floor(safeMoves.length * Math.random()) , 1)[0] );
   safeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;});
   safeMoves.sort(function(t1,t2){return t1.distanceToMine > t2.distanceToMine;});
-  if (myHero.health < 100) safeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;});
-  //  if (myHero.health > goodHP) safeMoves.sort(function(t1,t2){return t1.distanceToMine > t2.distanceToMine;});
-//  if (myHero.copyHealth <= 20 || myHero.distanceToWell > 2) safeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;});
-/*
-  if (safeMoves.length > 1 && safeMoves[0]==myHero){
-    temp = Math.floor(Math.random()*(safeMoves.length));
-    return getDirection(safeMoves[temp],'random safeMoves');
-  } else if ( (temp=safeMoves.filter(isGrave)) && temp.length > 0 ){
-    return getDirection( temp[0],'Grave ROBBER');
-  } else {
-    return getDirection(safeMoves[0],'safeMoves health or mine');
-  };
-*/
-  if (safeMoves.length == 1) return getDirection(safeMoves[0],'Locked: Nothing else to do');
+  if ( myHero.health < 100 /*goodHP(safeMoves[0])*/)
+    safeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;});
+//  if ( myHero.health < 100 && nearestEnemy && nearestEnemy.distance < 2 * myHero.distanceToMine)
+//    safeMoves.sort(function(t1,t2){return t1.distanceToWell > t2.distanceToWell;});
   if ( (temp=safeMoves.filter(isGrave)) && temp.length > 0 ) return getDirection( temp[0],'Grave ROBBER');
+  if ( myHero.alliesNearby.length && myHero.alliesNearby[0].health <= 70)
+    return getDirection(myHero, 'Healer!');
   if (myHero.direction == 'Stay' && safeMoves[0] == myHero){
-    if (unsafeMoves.length && unsafeMoves[0].distanceToMine < myHero.distanceToMine)
-      return getDirection(unsafeMoves[0],' - - - - BANZAAAII - - - -');
-    if (unsafeMoves.length && unsafeMoves[0].distanceToMine < myHero.distanceToMine)
-      return getDirection(unsafeMoves[0],' - - - - Run to HealthWell - - - -');
+    for (var i=0; i < unsafeMoves.length; ++i){
+      if (unsafeMoves.length && unsafeMoves[i].distanceToMine < myHero.distanceToMine && unsafeMoves[0].copyHealth != -100 && myHero.health >= 90)
+        return getDirection(unsafeMoves[i],' - - - - BANZAAAII - - - -');
+      if (unsafeMoves.length && unsafeMoves[i].distanceToWell < myHero.distanceToWell)
+        return getDirection(unsafeMoves[i],' - - - - Run to HealthWell - - - -');
+      if (unsafeMoves.length && unsafeMoves[i].distanceToLoneEnemy < myHero.distanceToLoneEnemy)
+        return getDirection(unsafeMoves[i],' - - - - HUNT and KILL - - - -');
+    };
+    if (safeMoves.length == 1)
+      return getDirection(safeMoves[0],'Locked: Nothing else to do');
     temp = 1 + Math.floor(Math.random()*(safeMoves.length - 1));
     return getDirection(safeMoves[temp],'random safeMoves, move around');
-  } else if (safeMoves[0] == myHero) {
+  } else if (safeMoves[0] == myHero/* && myHero.direction != 'Stay'*/) {
+    /*
     temp = Math.floor(Math.random()*(safeMoves.length));
     return getDirection(safeMoves[temp],'random safeMoves, hero not JUST staying');
+    */
+    return getDirection(myHero,'Hero staying but not JUST staying');
   } else {
     return getDirection(safeMoves[0],'safeMoves health or mine, whatever is closer');
   };
