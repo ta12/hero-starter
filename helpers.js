@@ -4,15 +4,19 @@ helpers.asciiBoard = function(gameData){
   var r = '';
   var m = function(t1){
     if (t1.type=='Hero')
-      return (t1.team!=gameData.activeHero.team)?'x_x':(
-        t1.id == gameData.activeHero.id ? 'O^O' : '\\o/') ;
-    if (t1.type == 'DiamondMine') return (!t1.owner?'_M_':t1.owner.team==gameData.activeHero.id?'-$-':'-@-');
-    if (t1.type == 'HealthWell') return '/H\\';
-    if (t1.type == 'Impassable') return '[#]';
-    return '...';
+      return (t1.team!=gameData.activeHero.team)?'_':(
+        t1.id == gameData.activeHero.id ? '@' : '^') ;
+    if (t1.type == 'DiamondMine')
+      return ((!t1.owner||t1.owner.dead)?' ':
+        t1.owner.team!=gameData.activeHero.team?'_':
+        t1.owner==gameData.activeHero?'+':'^');
+    if (t1.type == 'HealthWell') return ' ';
+    if (t1.type == 'Impassable') return 'I';
+    return '.';
   };
   for (var i=0; i < gameData.board.lengthOfSide; ++i){
-    for (var j=0; j < gameData.board.lengthOfSide; ++j ) r+=(m(gameData.board.tiles[i][j]));
+    for (var j=0; j < gameData.board.lengthOfSide; ++j )
+      r += m(gameData.board.tiles[i][j]) + gameData.board.tiles[i][j].getCode();
     r+=('\n');
   };
   return r;
@@ -73,7 +77,11 @@ helpers.ringTwoTiles = function(gameData, tile) {
 
   var isInacessible = function(direction){
     var temp = helpers.getTileNearby(gameData.board, tile.distanceFromTop, tile.distanceFromLeft, direction);
-    return !temp || !(temp.type === 'Unoccupied' || (temp.type === 'Hero' && temp.health < 40));
+    if (!temp) return true;
+    if (temp.type === 'Unoccupied') return false;
+    if (temp.type === 'Hero' && temp.id === gameData.activeHero.id) return false;
+    if (temp.type === 'Hero' && temp.health <= 30) return false;
+    return true;
   };
 
   if (isInacessible('North')){
@@ -124,6 +132,7 @@ helpers.findNearestObjectDirectionAndDistance = function(board, fromTile, tileCa
   queue.push(visitInfo);
 
   // While the queue has a length
+    var directions = ['North', 'East', 'South', 'West'];
   while (queue.length > 0) {
 
     // Shift off first item in queue
@@ -134,10 +143,7 @@ helpers.findNearestObjectDirectionAndDistance = function(board, fromTile, tileCa
     dfl = coords[1];
 
     // Loop through cardinal directions
-    var directions = ['North', 'East', 'South', 'West'];
-    directions.push(directions.splice((directions.length*Math.random())>>0 , 1)[0]);
-    directions.push(directions.splice((directions.length*Math.random())>>0 , 1)[0]);
-    directions.push(directions.splice((directions.length*Math.random())>>0 , 1)[0]);
+    directions.push(directions.shift());
     for (var i = 0; i < directions.length; i++) {
 
       // For each of the cardinal directions get the next tile...
