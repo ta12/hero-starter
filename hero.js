@@ -36,7 +36,9 @@ var move = function(gameData/*Old*/, helpers){
     return tile.type === 'Hero' && tile.team === myHero.team && tile.id !== myHero.id && tile.health <= hp;
   };};
   var isProtectedEnemy = function(tile){
-    if ( !(isEnemyBelow(myHero.health + 10)(tile)) ) return false;
+    if ( !(isEnemyBelow(100)(tile)) ) return false;
+    if ( (isEnemyAbove(myHero.health + 20)(tile)) ) return true;
+    if ( (isEnemyBelow(myHero.health - 50)(tile)) ) return false;
     var company = helpers.adjacentTiles(gameData, tile, false);
     company = company.filter(isEnemyAbove(0)).concat( company.filter(isHealthWell) );
     return company.length;
