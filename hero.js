@@ -49,10 +49,10 @@ var move = function(gameData/*Old*/, helpers){
     if(window && window.console && window.console.log){
       window.console.log(helpers.asciiBoard(gameDataOld));
       window.console.log(msg+'     myh:'+ (tile==myHero)+' dir:'+(tile.direction)+' dW:'+(tile.distanceToWell)+' dM:'+(tile.distanceToMine));
-      for(var i=0; i < possibleMoves.length; ++i){
+      for(var i=0; i < 5; ++i){
         var pM=possibleMoves[i];
         window.console.log('pos:'+pM.distanceFromTop+'|'+pM.distanceFromLeft+'  unsafe:'+pM.unsafe+'  mine:'+pM.distanceToMine+
-        '  kill:'+pM.deathCount+'  well:'+pM.distanceToWell+'  dir:'+pM.direction+'  copyH:'+pM.copyHealth);
+        '  kill:'+pM.deathCount+'  well:'+pM.distanceToWell+'  enmy:'+pM.distanceToLoneEnemy+'  dir:'+pM.direction+'  copyH:'+pM.copyHealth);
       };
     };
 */
@@ -153,6 +153,14 @@ var move = function(gameData/*Old*/, helpers){
     };
   };
 
+  for (var i = 0; i < possibleMoves.length; ++i){
+    var pM = possibleMoves[i];
+    if (pM.deathCount > 0) pM.deathCount -=
+      pM.twoAwayEnemies.filter(function(tile){
+        if (helpers.adjacentTiles(gameData, tile, false).filter(isHealthWell).length)
+          return true;
+    }).length;
+  };
   // fill distanceToMine and distanceToWell, safePath = true
   board.tiles[myHero.distanceFromTop][myHero.distanceFromLeft].type = 'Unoccupied';
   for ( var i=0; i < possibleMoves.length; ++i){
@@ -258,7 +266,7 @@ var move = function(gameData/*Old*/, helpers){
   // PERSEGUIR
   safeMoves.sort(function(t1,t2){return t1.distanceToLoneEnemy > t2.distanceToLoneEnemy;});
   for (var i=0; i < safeMoves.length; ++i){
-    if (safeMoves[i].distanceToLoneEnemy * 2 < safeMoves[i].distanceToMine)
+    if (safeMoves[i].distanceToLoneEnemy * 2 < safeMoves[i].distanceToMine && safeMoves[i].direction != 'Stay')
       return getDirection(safeMoves[i],'+ + + + PERSEGUIR + + + + +')
   };
 
